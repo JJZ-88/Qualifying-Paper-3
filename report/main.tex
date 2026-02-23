@@ -7,7 +7,7 @@
 
 % Note: You will get an empty bibliography warning when compiling until you include a citation.
 
-\documentclass[12pt]{article}
+\documentclass[11pt]{article}
 \usepackage[commenters={OA,DJM}]{shortex} % replace OA with your initials
 \usepackage[round]{natbib}
 \usepackage[margin=2.5cm]{geometry}
@@ -42,196 +42,194 @@
 \newpage
 
 \section{Introduction}
-With the development of \textit{Markov Chain Monte Carlo} (MCMC) sampling algorithms, statisticians and researchers are able to estimate parameters of interest in complex problems ranging from planet detection to disease modelling.
-However, one prevalent concern that has not been completely solved in the intervening decades is accurately diagnosing whether MCMC chains have converged (unless otherwise stated, this is convergence to a stationary distribution).
-A popular statistic to do so is the scale reduction factor $\hat{R}$ (Gelman, Rubin, 1992) which measures how well multiple chains initialized at different points can recover the same estimate, scaled by distributional variance.
-In essence, we want to see how well the chains "forget" their respective starting points, and converge to a stationary distribution (note that this may not be the target distribution).
-In most standard problems, $\hat{R}$ does an excellent job of monitoring convergence, but there are a number of significant underlying issues that can arise:
+Using \textit{Markov Chain Monte Carlo} (MCMC) sampling algorithms, statisticians and researchers are able to estimate parameters of interest in complex problems ranging from planet detection to disease modelling.
+However, one prevalent concern that has not been completely solved is accurately diagnosing whether MCMC chains have converged (unless otherwise stated, this implies convergence to a stationary distribution).
+A popular statistic to do so is the scale reduction factor $\hat{R}$ \citep{GelmanRubin1992}, which measures how well multiple chains initialized at different points can recover the same estimate.
+In essence, we want to see how well the chains ``forget'' their respective starting points, and converge to stationarity (note that this may not be the target distribution).
+In most cases, $\hat{R}$ does an excellent job of monitoring convergence, but there are a number of significant underlying issues that can arise:
 \begin{enumerate} \label{cons of rhat}
-  \item What threshold implies a ``good" $\hat{R}$ value is somehwat arbitrary and problem dependent.
+  \item What threshold implies a ``good'' $\hat{R}$ value is somewhat arbitrary and problem dependent.
   \item $\hat{R}$ may confuse non-convergence (high value) with a short sampling phase, i.e. we simply need to sample longer chains.
   \item Since long sampling phases are needed for $\hat{R}$, the necessary computational power needed for MCMC is high.
 \end{enumerate}
 
-Margossian et al. (henceforth denoted MEA) create a generalization of $\hat{R}$ called \textit{nested $\hat{R}$}, denoted $\hat{R}_v$, that leverages the \textit{many short-chains regime} to mitigate the 2nd and 3rd issues.
+\cite{Margossian2025}, henceforth denoted MEA, create a generalization of $\hat{R}$ called \textit{nested $\hat{R}$}, denoted $\hat{R}_\nu$, that leverages the \textit{many short-chains regime} to mitigate the 2nd and 3rd issues.
 Here, we are sampling many more MCMC chains, but for a far lesser number of sampling iterations.
-To aid in the effectiveness of $\hat{R}_v$ is the recent rise in Graphics Processing Unit (GPU) programming, which allows us to get a far greater number of samples for marginally more computational cost.
+Aiding in the effectiveness and practicality of $\hat{R}_\nu$ is the recent rise in Graphics Processing Unit (GPU) programming, which allows us to get a far greater number of samples for marginally more computational cost by running significantly more chains.
 
-In this paper, we will first provide some relevant background on $\hat{R}$, GPU programming and its corresponding GPU-compatible MCMC algorithms.
-Then we will formally introduce $\hat{R}_v$, and prove some convergence properties.
-Lastly, we wil discuss strengths and limitations of this new method, along with some further research avenues.
+In this paper, we will first provide relevant background on $\hat{R}$, GPU programming and its corresponding GPU-compatible MCMC algorithms.
+Then we will formally introduce $\hat{R}_\nu$, and prove some convergence properties.
+Lastly, we will discuss strengths and limitations of this new method, along with some further research avenues.
 
 \section{Relevant Background Work}
-  We starting by introducing core ideas to $\hat{R}_v$, namely the standard $\hat{R}$ diagnostic, the rise of GPU programming, and associated algorithms.
+  We start by introducing core ideas that motivate $\hat{R}_\nu$, namely the standard $\hat{R}$ diagnostic, rise of GPU programming, and associated algorithms.
 
   \subsection{Scale Reduction Factor} 
-    Iterative finite-length simulation (i.e. running multiple chains) was introduced in order to reduce the bias induced by the starting point in MCMC samples (Gelman, Rubin, 1992). 
+    Iterative finite-length simulation (i.e. running multiple chains) was introduced in order to reduce the bias induced by the starting point in MCMC samples \citep{GelmanRubin1992}. 
     Multiple chains allow us to measure the variability of our MCMC estimator, which in turn helps track convergence. 
     Intuitively, we hope to see that the variance between chains is dominated by the variance within chains, as this means our chains are ``forgetting" its starting point and producing estimators in close agreement.
     Formally, for $M$ MCMC chains of length $N$, let $f(x_n^{(m)})$ be the estimator of the $n$th point from the $m$th chain, $\hat{f}^{(m)}_N$ be the estimator of the $m$th chain and $\bar{f}_N$ be the estimator across all chains. 
     We define the \textit{scale reduction factor} $\hat{R}$ as
     \begin{align} \label{def: rhat}
-      \hat{B} = \frac{1}{M - 1}\sum_{m = 1}^M (\hat{f}^{(m)}_N - \bar{f}_N)^2 \qquad &\hat{W} = \frac{1}{M }\sum_{m = 1}^M \frac{1}{N - 1}\sum_{n = 1}^N(f(x_n^{(m)}) - \hat{f}^{(m)}_N)^2  \\
-      &\hat{R} = \sqrt{\frac{N - 1}{N} + \frac{\hat{B}}{\hat{W}}}
+      \widehat{B} = \frac{1}{M - 1}\sum_{m = 1}^M (\hat{f}^{(m)}_N - \bar{f}_N)^2 \qquad &\widehat{W} = \frac{1}{M }\sum_{m = 1}^M \frac{1}{N - 1}\sum_{n = 1}^N(f(x_n^{(m)}) - \hat{f}^{(m)}_N)^2  \\
+      &\widehat{R} = \sqrt{\frac{N - 1}{N} + \frac{\widehat{B}}{\widehat{W}}}.
     \end{align}
-    Generally, $\hat{R} < 1.01$ signals convergence (REF), but this is a debated topic and there is no concrete threshold.
-    Probabilistic software like STAN often use 4 independently initialized chains to estimate $\hat{R}$, but this may requires software to run very long chains to provide accurate estimates, and so MEA introduce $\hat{R}_v$ as an alternative.
+    Generally, $\hat{R} < 1.01$ signals convergence \citep{Vehtari2021}, but this is a debated topic and there is no concrete threshold.
+    Probabilistic software like stan \citep{rstan} often use 4 independently initialized chains to estimate $\hat{R}$, but this may require software to run very long chains to provide accurate estimates, and so MEA introduce $\hat{R}_\nu$ as an alternative.
 
   \subsection{GPU Programming} 
-    In order to run many chains without exhausting compute power, programs must make use of \textit{parallel accelerators} like GPU's, that can run multiple chains \textit{at the same time}.
-    As an example, MEA show that GPU's allow us to run 512 chains in $\sim20\%$ more compute time than 4 chain when sampling from the Rosenbrock distribution, giving us 128 times more samples for a modest increase in time.
-    Unfortuanately, we cannot simply apply our favorite MCMC method on GPU's to get good results, as many algorithms are not GPU-compatible.
-    This requires algorithms to use \textit{Single-Instruction Multiple-Data} (SIMD) instructions, meaning they run the exact same code at the same time (Sountsov et al, 2024). 
-    Methods that run different number of steps for each chain will have significant wasted computation as it ``slows down'' to match the max number of steps.
-    NUTS, a popular HMC tuning algorithm is not suited for parallelism as it is control-flow heavy and each chain can have different orbit lengths (leapfrog steps).
-    Parallelization can be done through libraries like JAX for Python (BlackJAX for algorirthmic support), which we will demonstrate in the project section. 
-    Though GPU programming is far faster than CPU programming, a tradeoff is that its memory capacity is significantly lower, which may affect its ability to handle extremely high-dimensional data.
+    In order to run many chains without exhausting compute time, programs must make use of \textit{parallel accelerators} like GPU's, that can run multiple chains \textit{at the same time}.
+    As an example, MEA shows that GPU's allow us to run 512 chains in $\sim20\%$ more compute time than 4 chains when sampling from the Rosenbrock distribution, giving us 128 times more samples for a modest increase in time.
+    However, we cannot simply apply our favorite MCMC method on GPU's to get good results, as many algorithms are not GPU-compatible.
+    GPU-compatibility requires algorithms to use \textit{Single-Instruction Multiple-Data} (SIMD) instructions, meaning they run the exact same code at the same time \citep{Sountsov2024}. 
+    To illustrate this idea, consider \textit{Hamiltonian Monte Carlo} (HMC), a broad class of MCMC algorithms that use a momentum variable to drive our chains quickly towards areas of high probability in a series of subsamples at each iteration, called leapfrog steps \citep{Neal2011}.
+    Methods that run different number of leapfrog steps for each chain will waste significant computation as it ``slows down'' to match the maximum number of leapfrog steps.
+    As an example, the \textit{No U-Turn Sampler} (NUTS), a popular HMC variant, runs a dynamic number of steps for each chain until it would `U-turn' (which is the orbit length), and thus is not SIMD-compatible \citep{Hoffman2014}.
+    Parallelization can be done through libraries like JAX for Python, with BlackJAX for algorithmic support \citep{Sountsov2024}, which we will demonstrate in the project section. 
+    Though GPU programming is far faster than CPU programming, a trade off is that its memory capacity is significantly lower, which may affect its ability to handle extremely high-dimensional data and parameters.
 
-  \subsection{Parallelizable MCMC Methods}
+  \subsection{Parallel MCMC Methods}
     In order to leverage parallelization to increase computational efficiency we must use algorithms that follow SIMD.
-    One such option is \textit{Change in Estimator of Expected Square} Hamiltonian Monte Carlo (ChEES HMC), which is used in MEA.
-    This algorithm tunes each chain \textit{synchronously}, ensuring the same number of leapfrog steps are taken (Hoffman, Radul, Sountsov), though different number of leapfrog steps may be taken between iterations.
-    For each HMC step, we tune each chain by maximizing the weighted gradients of autocorrelation of (centred) second moments
+    One such option is \textit{Change in Estimator of Expected Square} Hamiltonian Monte Carlo (ChEES HMC) \citep{Hoffman2021}.
+    This algorithm tunes each chain \textit{synchronously}, ensuring the same number of leapfrog steps are taken for SIMD-compatibility, though different number of leapfrog steps may be taken between iterations.
+    For each HMC iteration, we tune each chain by maximizing the weighted gradients of autocorrelation of centered second moments
     \begin{equation}
-      \nabla \text{ChEES} = \nabla \frac{1}{4}\mathbb{E}[(|| \theta^\prime - \mathbb{E}(\theta)||^2 - || \theta - \mathbb{E}(\theta)||^2)^2]
+      \nabla \text{ChEES} = \nabla \frac{1}{4}\mathbb{E}[(|| \theta^\prime - \mathbb{E}(\theta)||^2 - || \theta - \mathbb{E}(\theta)||^2)^2].
     \end{equation}
     The step size is tuned across chain to achieve a specific harmonic-mean acceptance probability. 
-    ChEES HMC outperforms NUTS with respect to ESS per gradient calculation, a measure of computational efficiency (Hoffman, et al).
+    ChEES HMC outperforms NUTS when run on GPU's with respect to ESS per gradient calculation, a measure of computational efficiency \citep{Hoffman2021}.
     Moreover, it performs substantially more (between double and 10-fold) gradient calculations per second, and so has an even greater advantage looking at ESS per second.
-    Now, since we are waiting for the ``slowest'' chain to catch up by tuning shorter trajectory lengths, we will see higher autocorrelation and hence a lower raw ESS.
+    Now, since we are waiting for the ``slowest'' chain to catch up by tuning shorter trajectory lengths, we will see higher autocorrelation and hence a lower ESS.
     This implies that in lower-dimensional problems where computation time is less of an issue, non-GPU compatible methods like NUTS would work better.
-    There may also be concern with complex, multimodal distributions where the modes have differing variances, as step size and trajectory may be trapped at small values  by chains initialized in ``narrow'' modes.
+    There are also concerns with complex, multimodal distributions where the modes have differing variances, as step size and trajectory may be trapped at small values  by chains initialized in ``narrow'' modes.
     This is to say, parallelization success is algorithmic dependent and not always the solution.
 
 
 \section{Nested $\hat{R}$}
-  We will now introduce the superchain regime, which leverages GPU's to run many chains in parallel, and produces a diagnostic, $\hat{R}_v$, that accurately reflects convergence.
-  In contrast to $\hat{R}$, we initialize groups of $M$ chains from the same point, and call these clusters of \textit{constrained superchains} (there are also \textit{naive superchaina} initialized at different points, but we assume superchains to be constrained in this paper).
+  We will now introduce the superchain regime, which leverages GPU's to run many chains in parallel, and produces a diagnostic, $\hat{R}_\nu$, that accurately reflects convergence.
+  In contrast to $\hat{R}$, we initialize groups of $M$ chains from the same point, and call these clusters \textit{constrained superchains} (there are also \textit{naive superchains} initialized at different points, but we assume superchains to be constrained in this paper).
   This construction allows us to remove the uncertainty in our MCMC estimate from a single initialization in our between-chain variance, because $M$ independent chains from an identical starting point will have variance a factor of $M$ less than a single chain.
-  Thus, the between-chain variance (from $\hat{R}$) becomes a proxy for convergence to a stationary distribution.
+  Thus, the between-chain variance becomes a proxy for convergence to a stationary distribution.
   We formalize this idea throughout this section.
 
   \subsection{Definitions}
     Introducing superchains adds another layer to our notation.
-    For the remainder of this paper, consider the superchain regime introduced by MEA where we have $K$ superchains initialized independently from a distribution $x_0^{(k)} \sim p_0$. 
-    For theoretical guarantees to hold, we wish $p_0$ to be overdispersed.
-    For each superchain, we run $M$ independent subchains starting at $x_0^{(k)}$ for $W$ warmup phases and $N$ sampling phases.
+    For the remainder of this paper, consider the superchain regime introduced by MEA where we have $K$ superchains initialized independently of a distribution $x_0^{(k)} \sim p_0$. 
+    We wish $p_0$ to be overdispersed to obtain theoretical guarantees of convergence (see project section for details).
+    For each superchain, we run $M$ independent subchains starting at $x_0^{(k)}$ for $N_W$ warmup phases and $N$ sampling phases.
     Let $f^{(nmk)}$ be the $n$th (sampling phase) sample from the $m$th subchain of $k$th superchain.
     We can define the respective subchain, superchain, and overall means for $m = 1,\dots,M$ and $k = 1,\dots,K$.
     \begin{equation}
-      \bar{f}^{(.mk)} = \frac{1}{N}\sum_{n = 1}^N f^{(nmk)} \qquad \bar{f}^{(..k)} = \frac{1}{M}\sum_{m = 1}^M \bar{f}^{(.mk)}  \qquad \bar{f}^{(...)} = \frac{1}{M}\sum_{k = 1}^K \bar{f}^{(..k)}
+      \bar{f}^{(.mk)} = \frac{1}{N}\sum_{n = 1}^N f^{(nmk)} \qquad \bar{f}^{(..k)} = \frac{1}{M}\sum_{m = 1}^M \bar{f}^{(.mk)}  \qquad \bar{f}^{(...)} = \frac{1}{M}\sum_{k = 1}^K \bar{f}^{(..k)}.
     \end{equation}
 
-    As before, we define between-superchain and within-superchain variance, however this time the latter consists of both between-subchain variance as well as within-subchain variance.
+    As before, we define between-superchain and within-superchain variance, however this time the latter consists of both between-subchain variance and within-subchain variance.
     \begin{align}
-      \hat{B}_v &= \frac{1}{K - 1}\sum_{k = 1}^K (\bar{f}^{(..k)} -  \bar{f}^{(...)})^2 \qquad \hat{W}_v = \frac{1}{K}\sum_{k = 1}^K (\tilde{B}_k + \tilde{W}_k) \\
-      \tilde{B}_k &= \begin{cases}
+      \widehat{B}_\nu &= \frac{1}{K - 1}\sum_{k = 1}^K (\bar{f}^{(..k)} -  \bar{f}^{(...)})^2 \qquad \widehat{W}_\nu = \frac{1}{K}\sum_{k = 1}^K (\widetilde{B}_k + \widetilde{W}_k) \\
+      \widetilde{B}_k &= \begin{cases}
         \frac{1}{M - 1}\sum_{m = 1}^M (\bar{f}^{(.mk)} -  \bar{f}^{(..k)})^2 & M > 1 \\
         0 & M = 1
       \end{cases} \\
-      \tilde{W}_k &= \begin{cases}
+      \widetilde{W}_k &= \begin{cases}
         \frac{1}{M}\sum_{m = 1}^M \frac{1}{N - 1}\sum_{n = 1}^N (\bar{f}^{(nmk)} -  \bar{f}^{(.mk)})^2 & N> 1 \\
         0 & N = 1
-      \end{cases}
+      \end{cases}.
     \end{align}
-    We formally define $\hat{R}_v$ as the ratio of the stadard deviations of all superchains to the average within-superchain standard deviation.
+    We formally define $\hat{R}_\nu$ as the ratio of the standard deviations of all superchains to the average within-superchain standard deviation.
     \begin{equation} \label{def: nest rhat}
-      \hat{R}_v = \sqrt{\frac{\hat{W}_v + \hat{B}_v}{\hat{W}_v}} = \sqrt{1 + \frac{\hat{B}_v}{\hat{W}_v}}
+      \widehat{R}_v = \sqrt{\frac{\widehat{W}_\nu + \widehat{B}_\nu}{\widehat{W}_\nu}} = \sqrt{1 + \frac{\widehat{B}_\nu}{\widehat{W}_\nu}}.
     \end{equation}
 
-  \subsection{Decomposing $\hat{R}_v$}
-    We now wish to understand how $\hat{R}_v$ behaves asymptotically. 
+  \subsection{Decomposing $\hat{R}_\nu$}
+    We now wish to understand how $\hat{R}_\nu$ behaves asymptotically. 
     By the (strong) law of large numbers and law of total variance.
     \begin{align}
-      \hat{B}_v \overset{K \to \infty}{\rightarrow} B_v = \Var(\bar{f}^{(..k)})
+      \widehat{B}_\nu \overset{a.s.}{\underset{K \to \infty}{\longrightarrow}} B_v = \Var(\bar{f}^{(..k)})
       &= \Var[\mathbb{E}(\bar{f}^{(..k)} \ |\ x_0^{(k)})] + \mathbb{E}[\Var(\bar{f}^{(..k)} \ |\ x_0^{(k)})] \\
-      &= \Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] + \frac{1}{M}\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] 
+      &= \Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] + \frac{1}{M}\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] .
     \end{align}
     The first term, $\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]$,  we call \textit{non-stationary variance}, which quantifies how well each chain ``forgets'' its initial value.
-    This goes to 0 when the estimators of each chain is in close agreement, and hence variance between chains decays.
+    This goes to 0 when the estimators of each chain are in close agreement, and hence variance between chains decays.
     In this case we say the chain has converged to a stationary distribution, which makes non-stationary variance the quantity we wish to monitor.
-    The second term, $\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]$, we call \textit{persistent variance}, which quantifies the variance of the chain itself.
-    This will not go to 0 (as $K \to \infty$), but we do expect it to converge to $\Var f$ if our chain reaches stationarity. 
+    The second term, $\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]$, we call \textit{persistent variance}, which quantifies the variance of the subchains themselves.
     In the standard $\hat{R}$ setting, $M = 1$, and so persistent variance is a substantial component of $\hat{B}$, meaning $\hat{R}$ does not explicitly model non-stationary variance.
     To ``kill'' persistent variance for a single chain, we would have to run very long chains so that the ESS is substantial and $\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] \approx \frac{1}{ESS}\mathbb{E}[\Var(\bar{f}^{(nmk)} \ |\ x_0^{(k)})]$. 
     This is a major weakness of $\hat{R}$ we discussed in \cref{cons of rhat} that is mitigated by the superchain regime.
 
-    Now $\hat{R}_v$ does not exactly monitor non-stationary variance.
-    From \cref{def: nest rhat} we see it is scaled by within-superchain variance $\tilde{W}_v$.
-    The asymptotic behaviour of $\tilde{W}_v$ is difficult to measure due to within-subchain variance (APPENDIX) but in the special case of $N = 1$, that goes away.
-    In fact, MEA show that by (strong) law of large numbers, for  $N = 1, M > 1$
-    \begin{equation}
-      \hat{W}_v \overset{K \to \infty}{\rightarrow} W_v = \mathbb{E}(\tilde{B}_k) = \mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^k)] 
+    Now $\hat{R}_\nu$ does not exactly monitor non-stationary variance.
+    From \cref{def: nest rhat} we see it is scaled by within-superchain variance $\widetilde{W}_v$.
+    The asymptotic behaviour of $\widetilde{W}_v$ is difficult to measure due to within-subchain variance (full details in \cref{sec: conv w}) but in the special case of $N = 1$, that goes away.
+    In fact, MEA shows that by (strong) law of large numbers, for  $N = 1, M > 1$
+    \begin{equation} \label{eq: convergence W}
+      \widehat{W}_\nu \overset{a.s.}{\underset{K \to \infty}{\longrightarrow}} W_v = \mathbb{E}(\widetilde{B}_k) = \mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^k)] .
     \end{equation}
-    This proof is not immediate and will be left for appendix.
     Now we can rewrite \cref{def: nest rhat} asymptotically (in $K$) by Continuous Mapping Theorem
     \begin{align} \label{eq: decomp rhat}
       \hat{R}_v \overset{K \to \infty}{\rightarrow} \sqrt{1 + \frac{B_v}{W_v}} &= \sqrt{1 + \frac{\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^k)] + \frac{1}{M}\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] }{\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]}} \\
-      &= \sqrt{1 + \frac{1}{M} + \frac{\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] }{\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]}}
+      &= \sqrt{1 + \frac{1}{M} + \frac{\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] }{\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]}}.
     \end{align}
-    Persistent variance should converge (in $N$) to $\Var f$, as we will discuss in the project section.
-    Given this, we have the relationship $\hat{R}_v < \epsilon \iff \Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] < \epsilon$ for some small tolerance $\epsilon$.
+    Persistent variance should converge (in $N_W$) to $\Var f$, as we will discuss in the project section.
+    Given this, we have the relationship $\hat{R}_v < 1 + \epsilon_1 \iff \Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] < \epsilon_2$ for some small tolerances $\epsilon_1, \epsilon_2$.
 
   \subsection{Further Considerations}  \label{false conv}
     To properly monitor superchain convergence to the target distribution, we must also consider sample bias in addition to variance.
-    In fact we can break down the MCMC error into squared bias, non-stationary variance (monitored by $\hat{R}_v$), and persistent variance (negligeable with superchains)
+    In fact, we can break down the MCMC error into squared bias, non-stationary variance (monitored by $\hat{R}_\nu$), and persistent variance (negligible with superchains)
     \begin{equation}
       \mathbb{E}((\bar{f}^{(..k)} - E f)^2) = (\mathbb{E} \bar{f}^{(..k)} - \mathbb{E} f)^2 + \Var (\mathbb{E}(\bar{f}^{(..k)} \ |\ x_0^{(k)})) + \mathbb{E}(\Var (\bar{f}^{(..k)} \ |\ x_0^{(k)}))
     \end{equation}
     Generally, a substantial warmup phase will eliminate the bias, but it is not immediately clear how long that should be.
     A more pressing problem is that bias may not converge to 0 if our chains are not finding the target distribution.
-    A clear example of this is a multimodal distribution, say a mixture of Gaussians, with underdispersed initial distribution.
+    A clear example of this is a multimodal distribution, say a mixture of Gaussians, with underdispersed initial distribution centered around a single mode.
     In this case we may have small non-stationary variance as the chains do converge to a stationary distribution (single mode), but clearly that is not the target.
-    In the Project section, we will explore conditions where non-stationary variance actually bounds squared bias, and so a small $\hat{R}_v$ directly implies that the expected error of MCMC has decayed.
+    In the Project section, we will explore conditions where non-stationary variance actually bounds squared bias, and so a small $\hat{R}_\nu$ directly implies that the MCMC error has decayed.
 
-    Another issue we have that carries over from \cref{cons of rhat} is what threshold on $\hat{R}_v$ actually implies convergence.
-    As we have seen in \cref{eq: decomp rhat}, the magnitude of persistent variance (and indirectly the target variance) will impact how well $\hat{R}_v$ monitors non-stationary variance.
-    Specifically, if we set a threshold on $\hat{R}_v$, then our non-stationary variance will be bounded 
+    Another issue we have that carries over from \cref{cons of rhat} is what threshold on $\hat{R}_\nu$ actually implies convergence.
+    As we have seen in \cref{eq: decomp rhat}, the magnitude of persistent variance (and indirectly the target variance) will impact how well $\hat{R}_\nu$ monitors non-stationary variance.
+    Specifically, if we set a threshold on $\hat{R}_\nu$, then our non-stationary variance will be bounded 
     \begin{equation}
-      \hat{R}_v \leq \delta \iff \frac{\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] }{\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]} \leq \delta^2 - 1 - \frac{1}{M} = \epsilon
+      \hat{R}_v \leq \delta \iff \frac{\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^{(k)})] }{\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^{(k)})]} \leq \delta^2 - 1 - \frac{1}{M} = \epsilon.
     \end{equation}
-    Of course for this bound to even be feasible, we need $\delta^2 - 1 > \frac{1}{M}$, which for $\delta= 1.01$, we need at least $M = 50$.
+    Of course for this bound to even be feasible, we need $\delta^2 - 1 > \frac{1}{M}$, which for $\delta= 1.01$, requires $M \geq 50$.
     Moreover, when persistent variance is large, this bound can still be substantial, in which case non-stationary variance may not have converged.
-    MEA propose to instead set a tolerance for scaled non-stationary variance
+    MEA proposes to instead set a tolerance for scaled non-stationary variance
     \begin{equation}
       \frac{\Var[\mathbb{E}(\bar{f}^{(.mk)} \ |\ x_0^k)] }{\mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^k)]} \leq \tau \implies \hat{R}_v \leq \sqrt{1 + \frac{1}{M} + \tau}
     \end{equation}
     This bound is clearly context specific but should be small next to tolerable square error.
-    In the project section, we will discuss ways how tight these bounds are.
+    In the project section, we will discuss how tight these bounds are.
 
 \section{Analysis and Discussion}
-  MEA give an excellent breakdown of how $\hat{R}_v$ improves upon the problems with $\hat{R}$ mentioned in \cref{cons of rhat}. 
+  MEA gives an excellent breakdown of how $\hat{R}_\nu$ improves upon the problems with $\hat{R}$ mentioned in \cref{cons of rhat}. 
   However, this is not to say that it is inherently more useful in all situations.
   In one sense, efficiently running superchains hinges on algorithms that leverage parallel computation, and we have already touched on problems that can be faced there.
-  In this section, we will analyze (BLANK) conditions where our proposed $\hat{R}_v$ computation falls short.
+  In this section, we will analyze 3 conditions where our proposed $\hat{R}_\nu$ computation falls short.
 
   \subsection{Algorithmic Dependence}
-    Nested $\hat{R}_v$ relies on SIMD-compatible algorithms to run many chains in parallel.
+    Nested $\hat{R}_\nu$ relies on SIMD-compatible algorithms to run many chains in parallel.
     We provide ChEES HMC as one algorithm, but it may not be an efficient option for certain target distributions, and in some cases will return extremely biased estimators.
-    Consider a (suitably distanced) multimodal distribution, for which ChEES HMC will trap individual chains in the respective modes, clearly not converging in general cases.
-    A far better algorithm would allow for mode jumping, for example parallel tempering or annealing (Earl, 2005), these algorithms have their own drawbacks of longer chains, and need to set good temperature schedules between chains. 
-    What is so nice with ChEES HMC is that everything is automated and does not have to be manually tuned, whereas other algorithms like parllel tempering require that extra effort.
+    Consider a suitably distanced multimodal distribution, for which ChEES HMC will trap individual chains in the respective modes, hence not converging in general.
+    A far better algorithm would allow for mode jumping, for example parallel tempering or annealing \citep{Neal2001}.
+    These algorithms have their own drawbacks of longer chains, and need to set good temperature schedules between chains. 
+    What is so nice with ChEES HMC is that everything is automated and does not have to be manually tuned, whereas an algorithm like parallel tempering require that extra effort, though recent advances have helped address this \citep{Syed2021}.
     Nowadays, there is seemingly a MCMC algorithm for every use case, but generalizing them to be SIMD-compatible can be a chore, and users must be able to recognize this when deciding to use the many-chains regime.
-    When the resulting (parallel) sampling algorithms deliver biased estimators, it would still be better to sample few chains for a large number of samples with a CPU-compatible method.
+    When the resulting parallel sampling algorithms deliver biased estimators, it would still be better to sample few chains for many samples with a CPU-compatible method.
     
   \subsection{False Convergence}
-    There are specific use cases where $\hat{R}_v$ gives false signals for convergence in both directions.
-    We have previously seen in \cref{false conv} that a multimodal Gaussian with initial distribution in a single mode will have $\hat{R}_v$ signalling convergence, though it does not.
+    There are specific use cases where $\hat{R}_\nu$ gives false signals for convergence in both directions.
+    We have previously seen in \cref{false conv} that a multimodal Gaussian with initial distribution in a single mode will have $\hat{R}_\nu$ signalling convergence, though it does not.
     Consider also a specific case where the target distribution is $0.5N(n, 1) + 0.5N(-n, 1)$ for some $n > 0$ with initial distribution normally distributed about 0. 
-    Because of the symmetry here, we expect (for large $K$) that about half of the chains will initialize and converge within each respective mode, and produce an estimator around 0.
-    However, $\hat{R}_v$ will be large because the between-superchain variance is substantial here.
-    This highlights the difference between the MCMC estimator converging (in probability) and the chains themselves actually mixing well.
-    Note that when $K$ is small here, we can underestimate between-superchain variance drastically if most initializations occur in the same mode.
+    Because of the symmetry here, we expect for large $K$ that about half of the chains will initialize and converge within each respective mode, and produce an estimator around 0, which is the true mean.
+    However, $\hat{R}_\nu$ will be large because the between-superchain variance is substantial here.
+    This highlights the difference between the MCMC estimator converging (in probability) and the chains themselves actually mixing well (we should note here that when the weights are not equal, $\hat{R}_\nu$ does correctly diagnose non-convergence).
+    When $K$ is small here, we can drastically underestimate between-superchain variance if most initializations occur in the same mode.
     Though these examples are quite contrived, it does merit consideration in real applications when we think the target distribution may be multimodal.
 
-  \subsection{Thresholds? Maybe move here from previous section}
-
-  \subsection{Alternative $\hat{R}$ Use Cases}
+  \subsection{Alternative Use Cases}
     A class of target distributions that have issues with standard $\hat{R}$ are heavy tailed distributions.
-    If the target has infinite variance, then within-subchain variance will dominate between-superchain variance, and $\hat{R}_v$ will show convergence as well regardless if the chains have found the same estimate.
-    A proposed fix in the standard regime is to use rank-normalized or folded $\hat{R}$, which use ranks and deviation from median respectively as opposed to raw estimates (vehtari et al).
-    This can also be applied in our many-chains regime, producing equivalent modifications for $\hat{R}_v$.
-    Moreover, there are other variations including split-$\hat{R}$ (Gelman, 2013), local-$\hat{R}$ (Moins, 2022) that can be used with the nested scheme, depending on use case. 
+    If the target has infinite variance, then within-subchain variance will dominate between-superchain variance, and $\hat{R}_\nu$ will show convergence as well regardless if the chains have found the same estimate.
+    A proposed fix in the standard regime is to use rank-normalized or folded $\hat{R}$, which use ranks and deviation from median respectively as opposed to raw estimates \citep{Vehtari2021}.
+    This can also be applied in our many-chains regime, producing equivalent modifications for $\hat{R}_\nu$.
+    Moreover, there are other variations including split-$\hat{R}$ \citep{Gelman2013}, local-$\hat{R}$ \citep{Moins2022} that can be used with the nested scheme, depending on use case. 
  
 
 
@@ -239,152 +237,379 @@ Lastly, we wil discuss strengths and limitations of this new method, along with 
 \newpage
 
 \setcounter{section}{0}
+
+\begin{abstract}
+  With the use of parallel accelerators like GPU's we can now run many Markov Chain Monte Carlo (MCMC) chains in marginally more time than a single chain. 
+  To analyze convergence of these short superchains, we use $\hat{R}_\nu$, a generalization of the scale reduction factor $\hat{R}$. 
+  This measures how well our chains forget its starting point and converge to a stationary distribution by mitigating the influence of variation within each chain.
+  However, it does not directly measure if sample bias is also converging to 0, and so we cannot guarantee that we have found the correct stationary distribution.
+  We propose conditions that guarantee sample bias is bounded by $\hat{R}_\nu$, and hence it can directly diagnose convergence.
+  In this paper, we will propose and derive theoretical bounds for sample bias and the components of $\hat{R}_\nu$, as well as provide numerical experiments that verify our claims.
+\end{abstract}
+
+
 \section{Introduction}
-  An overarching problem in Markov Chain Monte Carlo (MCMC) sampling is how to correctly monitor convergence (we refer to this as convergence to a stationary distribution).  
-  One diagnostic that was recently developed is \textit{nested $\hat{R}$}, denoted $\hat{R}_v$, which monitors the variance of MCMC chains (Margossian, et al).
-  It measures how well chains forget their starting point and produce estimators in agreement better than many popular diagnostics.
-  However, to fully determine whether our chains have found the target distribution, we must ensure bias also decays, which is not monitored by $\hat{R}_v$.
-  In general, we expect bias to decay with a sufficiently long warmup phase, but it is not immediately clear how long that should be.
+  An overarching problem in Markov Chain Monte Carlo (MCMC) sampling is how to correctly monitor convergence to a stationary distribution.  
+  One diagnostic that was recently developed is \textit{nested $\hat{R}$}, denoted $\hat{R}_\nu$, which monitors the variance of MCMC chains \citep{Margossian2025}.
+  It measures how well chains forget their starting point and produce estimators in agreement.
+  However, we must ensure bias also decays, which means we need our chains to converge to the correct stationary distribution, something not directly monitored by $\hat{R}_\nu$.
+  In general, we expect bias to decay with a sufficiently long warmup phase, but optimal length is difficult to determine, and varies between distributions.
   A more pressing problem is that bias may not converge to 0 if our chains are not finding the target distribution.
-  A clear example of this is a multimodal distribution, say a mixture of Gaussians, with underdispersed initial distribution.
-  In this case we may have small non-stationary variance as the chains do converge to a stationary distribution (single mode), but clearly that is not the target.
-  Of course we would want to have a diagnostic that also monitors bias, but that is quite difficult in practice when we do not know the true mean of our target.
-  Instead, we will show that with an overdispersed initial distirbution, squared bias is bounded by \textit{non-stationary variance} (to be defined), which is directly monitored by $\hat{R}_v$, and hence we can use it to diagnose convergence.
-  In this paper, we will introduce the fundamentals of MCMC convergence and the $\hat{R}_v$ diagnostic, propose and prove bounds for squared bias and non-stationary variance, and verify our claims with numerical experiments.
+  A clear example of this is a multimodal distribution with underdispersed initial distribution.
+  In this case we may have small variance between chains, and so they seem to converge to a stationary distribution, but are in fact trapped within a single mode.
+  A diagnostic that also monitors bias is ideal, but that is quite difficult in practice when we do not reliably know the true mean of our target.
+  Instead, we will show that with an overdispersed initial distribution, squared bias is bounded by \textit{non-stationary variance} (to be defined), which is directly monitored by $\hat{R}_\nu$, and hence we can use it to diagnose convergence.
+  In this paper, we will introduce the fundamentals of MCMC convergence and the $\hat{R}_\nu$ diagnostic, propose and prove bounds for squared bias and non-stationary variance, and verify our claims with numerical experiments.
 
   \subsection{Nested $\hat{R}$}
-    We starting by introducing the convergence diagnostic $\hat{R}_v$ (Margossian, et al). 
+    We start by introducing the convergence diagnostic $\hat{R}_\nu$. 
     To compute this, we run $K$ \textit{constrained superchains}, which are groups of $M$ independent MCMC subchains initialized at the same point $x_0^{(k)} \sim p_0$.
-    To run many chains efficiently, we use SIMD-compatible parallel MCMC methods on GPU's like ChEES HMC, which in favorable conditions can run hundreds more chains than CPU methods in marginally more time (JAX paper REF).
-    This construction allows us to reduce the effect within-chain variability in our MCMC samples from a single initialization, because $M$ independent chains from an identical starting point will have variance a factor of $M$ less than a single chain.
-    Convergence occurs if our chains are ``forgetting" its starting point and finding the same estimated values.
-    We define $\hat{R}_v$ to measure the ratio of variance between superchains, and variance within superchains.
-    A formal derivation is in (Appendix).
+    To run many chains efficiently, we use SIMD-compatible parallel MCMC methods on GPU's like ChEES HMC, which in favorable conditions can run hundreds more chains than CPU methods in marginally more time \citep{Sountsov2024}.
+    We define $\hat{R}_\nu$ to measure the ratio of variance between superchains and variance within superchains.
+    A formal derivation is in \cref{sec: rhat}.
 
   \subsection{Convergence of MCMC Chains}
     To analyze error of MCMC superchains, we can break it down into bias and variance components.
     Let $f^{(nmk)}$ be the $n$th sample from $m$th subchain in $k$th superchain, $\bar{f}^{(.mk)}$ be the mean of $m$th subchain in $k$th superchain, and $\bar{f}^{(..k)}$ be the mean of $k$th superchain. Then,
     \begin{equation}
-      \mathbb{E}((\bar{f}^{(..k)} - E f)^2) = (\mathbb{E} \bar{f}^{(..k)} - \mathbb{E} f)^2 + \Var (\mathbb{E}(\bar{f}^{(..k)} \ |\ x_0^{(k)})) + \mathbb{E}(\Var (\bar{f}^{(..k)} \ |\ x_0^{(k)}))
+      \mathbb{E}((\bar{f}^{(..k)} - E f)^2) = (\mathbb{E} \bar{f}^{(..k)} - \mathbb{E} f)^2 + \Var (\mathbb{E}(\bar{f}^{(..k)} \ |\ x_0^{(k)})) + \mathbb{E}(\Var (\bar{f}^{(..k)} \ |\ x_0^{(k)})).
     \end{equation}
-    The last term, \textit{persistent variance} is negligeable in our superchain regime, as $\mathbb{E}(\Var (\bar{f}^{(..k)} \ |\ x_0^{(k)})) = \frac{1}{M}\mathbb{E}(\Var (\bar{f}^{(.mk)} \ |\ x_0^{(k)}))$, which goes to 0 as $M$ increases.
-    The second term, \textit{non-stationary variance}, will dissapear as chains converge to stationarity, and is monitored directly by $\hat{R}_v$ scaled by persistant variance (Margossian, et al).
-    Together, using $\hat{R}_v$ in the superchain regime directly monitors variance of our MCMC chains.
-    Estimating the first term, sqaured bias, requires us to have a good estimate of the sample mean, but this is never known in practice or else sampling is pointless.
-    Thus, we require a proxy measure of bias, in order to determine convergence, which we will introduce in the next section.
+    The last term, \textit{persistent variance}, is negligible in our superchain regime, as $\mathbb{E}(\Var (\bar{f}^{(..k)} \ |\ x_0^{(k)})) = \frac{1}{M}\mathbb{E}(\Var (\bar{f}^{(.mk)} \ |\ x_0^{(k)}))$, which goes to 0 as $M$ increases.
+    The second term, \textit{non-stationary variance}, will disappear as chains converge to stationarity, and is estimated by the sample variance of the superchain Monte Carlo estimators.
+    Together, $\hat{R}_\nu$ directly monitors variance of our MCMC chains.
+    Estimating the first term, squared bias, requires us to have a good estimate of the sample mean, which we cannot assume to be true.
+    Thus, we require a proxy measure of bias, which we will introduce in the next section.
 
   \subsection{Related Works}
-    A detailed analysis of $\hat{R}_v$ properties and performance is found in Margossian et al. 
-    The question of what threshold on $\hat{R}_v$ (equivalently standard $\hat{R}$) actually implies convergence to a stationary distribution is prevalent, with no definitive answers (Vats, Knudson, 2021).
-    Margossian et al. do argue that it suffices to have a tolerable error on non-stationary variance, though that is problem-dependent as well.
-    There are unbiased MCMC algorithms that remove squared bias through coupling, and thus allow $\hat{R}_v$ to monitor squared error (Jacobs et al. 2020).
-    However, the natural tradeoff is the relative inefficiency (i.e. higher variance) and far longer compute time (in fact it is not SIMD compatible and so the benefits of parallelization are not applicable).
-    Additionally, there are methods like annealed importance sampling (Neale et al, 2001) and sequential Monte Carlo (Del Moral et al, 2006) that control bias without running egregiously long warmups.
+    A detailed analysis of $\hat{R}_\nu$ properties and performance is found in \cite{Margossian2025}. 
+    The question of what threshold on $\hat{R}_\nu$ (equivalently standard $\hat{R}$) actually implies convergence to a stationary distribution is prevalent, with no definitive answers \citep{Vehtari2021}.
+    \cite{Margossian2025} do argue that it suffices to have a tolerable error on non-stationary variance, though that is problem-dependent as well.
+    There are unbiased MCMC algorithms that remove squared bias through coupling, and thus allow $\hat{R}_\nu$ to monitor squared error \citep{Jacob2020}.
+    However, the natural trade off is the relative inefficiency (i.e. higher variance) and far longer compute time (in fact it is not SIMD compatible and so the benefits of parallelization are not readily applicable).
+    Additionally, there are methods like annealed importance sampling \citep{Neal2001} and sequential Monte Carlo \citep{DelMoral2006} that control bias without running long warmups, but they exhibit increased variance and are difficult to tune.
 
 
 \section{Analysis of Convergence}
-  We now look to show that with an overdispersed distribution, the squared bias is bounded by the non-stationary variance. 
-  The problem of how to choose a distribution that is both overdispersed and similar to our target distribution (in the sense that it does not initialize in areas with negligeble density) is important but will not be touched on.
+  We now show that with an overdispersed distribution, the squared bias is bounded by the non-stationary variance. 
+  The problem of how to choose a distribution that is both overdispersed and similar to our target distribution (in the sense that it does not initialize in areas with negligible density) is important but will not be touched on.
   In this section we will theoretically derive bounds for non-stationary variance and bias, and show that they decay at the same rate.
-  We base our ideas on unpublished works of Margossian.
+  We base our work on ideas from Margossian.
 
   \subsection{Bounding Non-stationary Variance}
-    For a given superchain initiazlized at $x_0^{(k)}$, we write the conditional bias
+    To simplify our discussion, we will consider a single chain within our many short chains regime. 
+    We denote $x_0$ as the initial point and $\hat{f}_N$ as the estimator after $N$ sampling iterations (including warmup).
+    We write the conditional bias
     \begin{equation} \label{eq: cond bias}
-      |\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f| = b(x_0^{(k)})h(x_0^{(k)}, N)
+      |\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f| = b(x_0)h(x_0, N).
     \end{equation}
-    where $b(x_0^{(k)}) = |f(x_0^{(k)})- \mathbb{E} f|$ is the initial bias and $h$ is a decay function with $h(x_0^{(k)}, 0) = 0$. 
-    Here, $N$ is the total number of sampling steps inclding warmup.
-    For a chain that converges to stationarity, we expect $h(x_0^{(k)}, N) \to  0$ in our sampling phase (but may not hold otherwise).
+    where $b(x_0) = |f(x_0)- \mathbb{E} f|$ is the initial bias and $h$ is a decay function with $h(x_0, 0) = 1$. 
+    Here, $N$ is the total number of sampling steps including warmup.
+    For a chain that converges to stationarity, we expect $h(x_0, N) \to  0$ in our sampling phase (but may not hold otherwise).
     We first state a bound for non-stationary variance in terms of these quantities.
 
-    \begin{theorem}
+    \begin{theorem} \label{thm: sandwich}
       Given \cref{eq: cond bias}, we can derive the following bound:
       \begin{equation} \label{eq: nonstatvar bound}
-        \Var(b(x_0^{(k)}) h(x_0^{(k)}, N)) \leq \Var \mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) \leq \mathbb{E} (b^2(x_0^{(k)}) h^2(x_0^{(k)}, N))
+        \Var(b(x_0) h(x_0, N)) \leq \Var \mathbb{E}(\hat{f}_N \ |\ x_0) \leq \mathbb{E} (b^2(x_0) h^2(x_0, N)).
       \end{equation}
     \end{theorem}
-    
-    \begin{proof}
-      To obtain these bounds, we apply variance expansions and \cref{eq: cond bias} 
-      \begin{align}
-        \Var(b(x_0^{(k)}) h(x_0^{(k)}, N)) = \Var |\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f| &\leq \Var (\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f) \\
-        &= \mathbb{E}[(\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f)^2] \\
-        &= \mathbb{E}[b^2(x_0^{(k)})h^2(x_0^{(k)}, N)]
-      \end{align}
-      The first inequality holds intuitively because absolute value reduces variation (also by monotonicity of expectation -- further proof in appendix??). 
-      The second equality holds by variance expansion (should be obvious -- elaborate??).
-      Since $\mathbb{E} f$ is constant, we can substitute $\Var (\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f) = \Var \mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)})$ in our above equations to get the desired bounds. 
-    \end{proof}
 
-    We originally assumed that $h$ depends on both initialization and sampling length, but we can relax this by assuming our decay $h(N)$ is solely dependent on sampling step. 
-    It has been shown that this is possible under uniform boundedness of the target to proposal ratio using the Metropolis Hastings algorithm (Wang, 2022). 
+    Proof is in \cref{sec: prove sandwich}. We originally assumed that $h$ depends on both initialization and sampling length, but we can relax this by assuming our decay $h(N)$ is solely dependent on number of iterations. 
+    It has been shown that this is possible under uniform boundedness of the target to proposal ratio using the Metropolis Hastings algorithm \citep{Wang2022}. 
     Alternatively, it would be worthwhile to investigate upper and lower bounds of the decay function depending on initialization.
     Under this relaxation we get the following corollary.
-    \begin{corollary}
-      Suppose a decay function $h(N)$ independent of of the initialization. Then we can rewrite \cref{eq: nonstatvar bound} as
+    \begin{corollary} \label{cor: ns bounds}
+      Suppose a decay function $h(N)$ independent of the initialization. Then we can rewrite \cref{eq: nonstatvar bound} as
       \begin{equation}
-        \Var(b(x_0^{(k)})) h^2(N) \leq \Var \mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) \leq \mathbb{E} (b^2(x_0^{(k)})) h^2(N)
+        \Var(b(x_0)) h^2(N) \leq \Var \mathbb{E}(\hat{f}_N \ |\ x_0) \leq \mathbb{E} (b^2(x_0)) h^2(N).
       \end{equation}
     \end{corollary}
 
-    Under these assumptions, we see that the non-stationary variance will also decay at the rate $h(N)$.
-    How tight these bounds are depends on the difference $\mathbb{E} (b^2(x_0^{(k)})) - \Var(b(x_0^{(k)})) = (\mathbb{E} b^2(x_0^{(k)}))^2$.
+    Under these assumptions, we see that the non-stationary variance will decay at approximately the rate $h(N)$ as $N \to \infty$.
+    How tight these bounds are depends on the difference $\mathbb{E} (b^2(x_0)) - \Var(b(x_0)) = (\mathbb{E} b^2(x_0))^2$.
     When the expected initial bias is very small, this gives an exact equation for the decay of non-stationary variance.
 
   \subsection{Bounding Squared Bias}
     To derive bounds on the marginal bias, we write the initial variance as
     \begin{equation}
-      \Var \mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)})  = \Var f(x_0^{(k)}) g(N)
+      \Var \mathbb{E}(\hat{f}_N \ |\ x_0)  = \Var f(x_0) g(N)
     \end{equation}
-    where $\Var f(x_0^{(k)})$ is the initial variance and $g(N)$ is some decay function. 
-    We are assuming that the decay of non-stationary variance is independent of initialization but can relax that and use decay $g(x_0^{(k)}, N)$.
+    where $\Var f(x_0)$ is the initial variance and $g(N)$ is some decay function. 
+    We are assuming that the decay of non-stationary variance is independent of initialization but can relax that and use decay $g(x_0, N)$ as with our breakdown of conditional bias.
 
-    \begin{proposition}
-      Suppose the conditional bias and non-stationary variances have decary rates $h(N), g(N)$ that are independent of initial point. Furthermore, assume that $g(N) = h^2(N)$. Then,
+    \begin{proposition} \label{prop: ns bound 1}
+      Suppose the conditional bias and non-stationary variances have decay rates $h(N), g(N)$ that are independent of initial point. Furthermore, assume that $g(N) = h^2(N)$. Then,
       \begin{equation}
-        \Var f(x_0^{(k)}) \geq (\mathbb{E}b(x_0^{(k)}))^2 \implies \Var \mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) \geq (\mathbb{E} \hat{f}^{(.mk)} - \mathbb{E} f)^2
+        \Var f(x_0) \geq (\mathbb{E}b(x_0))^2 \implies \Var \mathbb{E}(\hat{f}_N \ |\ x_0) \geq (\mathbb{E} \hat{f}_N - \mathbb{E} f)^2
       \end{equation}
     \end{proposition}
 
-    \begin{proof}
-      We first bound the squared bias by the conditional squared bias with Jensen's inequality using the fact $\mathbb{E} \mathbb{E} f = \mathbb{E} f$ since it is constant,
-      \begin{equation}
-        |\mathbb{E} \hat{f}^{(.mk)} - \mathbb{E} f| = |\mathbb{E} (\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f)| \leq \mathbb{E} |\mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)}) - \mathbb{E} f| = h(N) \mathbb{E} |b(x_0^{(k)})|
-      \end{equation}
-      It follows directy by assumption that
-      \begin{equation}
-        (\mathbb{E} \hat{f}^{(.mk)} - \mathbb{E} f)^2 \leq h^2(N) (\mathbb{E} b(x_0^{(k)}))^2 \leq h^2(N) \Var f(x_0^{(k)}) = \Var \mathbb{E}(\hat{f}^{(.mk)} \ |\ x_0^{(k)})
-      \end{equation}
-      as desired.
-    \end{proof}
-
-    Notice that our condition here is exactly that of overdispersion, requiring the variance of our initial distribution to be greater than the sqaured expected distance (variance) from the true mean (formalize this -- maybe with math).
+    Proof is in \cref{sec: prove ns1}. 
+    Notice that our condition here is exactly that of overdispersion, requiring the variance of our initial distribution to be greater than the squared initial bias.
     Note however that the converse is not true in general unless the conditional and marginal biases are equal.
-
-  \subsection{Bounding Persistant Variance}
-    For $\hat{R}_v$ to monitor non-stationary variance, we require persistant variance to be constant with respect to $N$ and $x_0^k$, otherwise $\hat{R}_v$ estimate will be unduly influenced by the sampling step.
-    Moreover, it is of interest how it behaves relative to the target variance, $\Var f$, which it should converge to.
-    The following proposition provides bounds for persistant variance.
-    \begin{proposition}
-      Suppose as before that the conditional bias has decay rate independent of initial point. Given \cref{eq: cond bias}, we can bound the persistant variance around the target variance
+    To conclude this section, we will state another condition for which squared bias will be bounded by non-stationary variance, which is does not require identical decay rates by using \cref{cor: ns bounds} (proof in \cref{sec: prove ns2}).
+    \begin{proposition} \label{prop: ns bound 2}
+      Suppose the conditional bias and non-stationary variances have decay rates $h(N), g(N)$ that are independent of initial point. Then,
       \begin{equation}
-        \Var f - \mathbb{E}(b^2(x_0^{(k)}))h^2(N) \leq \mathbb{E}(\Var (\bar{f}^{(..k)} \ |\ x_0^{(k)})) \leq \Var f + C \mathbb{E}(b^2(x_0^{(k)}))h^2(N) 
+        \Var f(x_0) + C \geq (\mathbb{E}b(x_0))^2 \implies \Var \mathbb{E}(\hat{f}_N \ |\ x_0) \geq (\mathbb{E} \hat{f}_N - \mathbb{E} f)^2
       \end{equation}
-      where the constant $C = 3 + 2|\mathbb{E} f|$.
+      where $C = [\mathbb{E}(f(x_0) - \mathbb{E} f)]^2 - [\mathbb{E}|f(x_0) - \mathbb{E} f|]^2$.
     \end{proposition}
-    We leave the proof for the appendix.
 
-  \section{Numerical Experiments}
+  \subsection{Bounding persistent Variance}
+    For $\hat{R}_\nu$ to monitor non-stationary variance, we require persistent variance to be constant with respect to $N$ and $x_0$, otherwise the $\hat{R}_\nu$ estimate will be unduly influenced by the sampling step.
+    Moreover, it is of interest how it behaves relative to the target variance, $\Var f$, which it should converge to.
+    The following proposition provides bounds for persistent variance.
+    \begin{proposition} \label{prop: pers var}
+      Suppose as before that the conditional bias has decay rate independent of initial point. Additionally, we assume that $\mathbb{E} |f| < \infty$. Given \cref{eq: cond bias}, we can bound the persistent variance around the target variance
+      \begin{equation}
+        C - 2\mathbb{E}|f| \mathbb{E}(b(x_0)) h(N) + \Var f \leq \mathbb{E} \Var (\bar{f}^{(.mk)} \ |\ x_0) \leq C - \mathbb{E}|f| \mathbb{E}(b(x_0)) h(N) + \Var f
+      \end{equation}
+      where $C = \mathbb{E}((\bar{f}^{(.mk)})^2) - \mathbb{E} (f^2)$ is the difference in squared estimators.
+    \end{proposition}
+    Proof is in \cref{sec: prove persvar}.
+    Under the assumption $\mathbb{E}|f| < \infty$, the middle terms will be dominated by the conditional bias, which will go to 0 if the MCMC chains converge to stationarity.
+    Hence, persistent variance being stable as $N$ increases boils down to whether the chain variance is similar to the target variance.
+    If this is true, we can be confident that the persistent variance will not overly influence non-stationary variance, and in nice cases can adjust explicitly obtain non-stationary variance from $\hat{R}_\nu$, using \cref{eq: decomp rhat}.
+
+
+\section{Numerical Experiments}
+  We run a series of experiments to demonstrate the bounds we derived in the previous section.
+  We will first consider a simple Gaussian example to illustrate proof of concept. 
+  Then we will consider the high-dimensional \textit{Item Response Theory} (IRT) model, to analyze performance in a more setting. 
+  Finally, we look at a bimodal distribution, to understand how our quantities work under non-convergence.
+  A full description of the models will be in the \cref{sec: exps}.
+  In each example, we will consider the first moment.
+  We will run 32 superchains of 64 subchains each, using  ChEES HMC on a T4 GPU to tune these chains in parallel.
+  Results are based on iteratively sampling $N = 1$ iterations, with each iteration being considered part of the ``warmup'' for subsequent iterations.
+
+  \cref{fig: nsbias} compares non-stationary variance to squared bias on the log scale.
+  We see that they clearly decrease together at the same rate until they reach stationarity, which supports our assumption in \cref{prop: ns bound 1} that the decay rates are equal. 
+  Along with the fact that initial variance is greater than initial squared bias in our simulated examples, satisfying assumptions (shown in \cref{sec: nsbias}), these numerical experiments support our conclusions in \cref{prop: ns bound 1}.
+  We should note that once the chains are approximately stationary, there are numerical issues (i.e. significant oscillation, and even negative variances), which may be induced by HMC properties (there is room for further investigation).
+  Even for the bimodal Gaussian case, non-stationary variance dominates initial bias even though the chains do not converge to stationarity.
+
+  \cref{fig: persvar} compares the persistent variance over successive sampling iterations, to determine whether they converge to the target variance, and if the bounds in \cref{eq: pers var bound} hold.
+  In the Gaussian and IRT examples, it converges to $\Var f$ and oscillates around it (note that IRT is sufficiently warmed up at start of sampling phase while Gaussian is not).
+  Though we cannot explicitly compute the bounds from \cref{prop: pers var}, it likely holds because we know from \cref{fig: nsbias} that decay rate $h(N)$ goes to 0 quickly, and the additional term $C$ is small because the bias is negligible. 
+  In our bimodal Gaussian example, persistent variance is not anywhere near the target variance, because each chain converges inside a small mode.
+  This does not immediately contradict our bound from \cref{prop: pers var}, as we expect both high bias for $f^2$ and a non-decaying $h(N)$ function.
+
 
 
 \newpage
 
+\section{Appendix}
+  \subsection{Convergence of Within-Subchain Variance} \label{sec: conv w}
+    In this appendix section, we wish to formally state the within-subchain variance for general $N$, which was stated for $N = 1$ in \cref{eq: convergence W}. The general limit is
+    \begin{gather}
+      \widehat{W}_\nu \overset{a.s.}{\underset{K \to \infty}{\longrightarrow}} W_v = \mathbb{E}(\widetilde{B}_k) = \mathbb{E}[\Var(\bar{f}^{(.mk)} \ |\ x_0^k)] + W^\prime \\
+      W^\prime = \begin{cases}
+        \frac{1}{N - 1} \sum_{n = 1}^N [\Var f^{(nmk)} - \Var \bar{f}^{(.mk)} + (\mathbb{E} f^{(nmk)})^2 - (\mathbb{E} \bar{f}^{(.mk)})^2] & N > 1 \\
+        0 & N = 1
+      \end{cases}
+    \end{gather}
 
-We made amazing contributions to the world of musical fractal pasta 
-\citep{McDonald2017,Tibshirani2013}. We use Natbib, so be sure to use
-\citep{Stein1981} for parenthetical references. Or you can say, according to
-\citet{HastieTibshirani2009}, we should strive to balance truth and lies.
+    The proof will be omitted.
+
+  \subsection{Formal Definition of $\hat{R}_\nu$} \label{sec: rhat}
+    In this appendix section, we wish to formally define $\hat{R}_\nu$ for completeness.
+    Consider the superchain regime introduced in \cite{Margossian2025} where we have $K$ superchains initialized independently of a distribution $x_0^{(k)} \sim p_0$. 
+    For theoretical guarantees to hold, we wish $p_0$ to be overdispersed.
+    For each superchain, we run $M$ independent subchains starting at $x_0^{(k)}$ for $N_W$ warmup phases and $N$ sampling phases.
+    Let $f^{(nmk)}$ be the $n$th (sampling phase) sample from the $m$th subchain of $k$th superchain.
+    We can define the respective subchain, superchain, and overall means for $m = 1,\dots,M$ and $k = 1,\dots,K$.
+    \begin{equation}
+      \bar{f}^{(.mk)} = \frac{1}{N}\sum_{n = 1}^N f^{(nmk)} \qquad \bar{f}^{(..k)} = \frac{1}{M}\sum_{m = 1}^M \bar{f}^{(.mk)}  \qquad \bar{f}^{(...)} = \frac{1}{M}\sum_{k = 1}^K \bar{f}^{(..k)}.
+    \end{equation}
+
+    As before, we define between-superchain and within-superchain variance, however this time the latter consists of both between-subchain variance and within-subchain variance.
+    \begin{align}
+      \widehat{B}_\nu &= \frac{1}{K - 1}\sum_{k = 1}^K (\bar{f}^{(..k)} -  \bar{f}^{(...)})^2 \qquad \widehat{W}_\nu = \frac{1}{K}\sum_{k = 1}^K (\widetilde{B}_k + \widetilde{W}_k) \\
+      \widetilde{B}_k &= \begin{cases}
+        \frac{1}{M - 1}\sum_{m = 1}^M (\bar{f}^{(.mk)} -  \bar{f}^{(..k)})^2 & M > 1 \\
+        0 & M = 1
+      \end{cases} \\
+      \widetilde{W}_k &= \begin{cases}
+        \frac{1}{M}\sum_{m = 1}^M \frac{1}{N - 1}\sum_{n = 1}^N (\bar{f}^{(nmk)} -  \bar{f}^{(.mk)})^2 & N> 1 \\
+        0 & N = 1
+      \end{cases}.
+    \end{align}
+    We formally define $\hat{R}_\nu$ as the ratio of the standard deviations of all superchains to the average within-superchain standard deviation.
+    \begin{equation} \label{def: nest rhat}
+      \widehat{R}_v = \sqrt{\frac{\widehat{W}_\nu + \widehat{B}_\nu}{\widehat{W}_\nu}} = \sqrt{1 + \frac{\widehat{B}_\nu}{\widehat{W}_\nu}}.
+    \end{equation}
+
+  \subsection{Bounding Non-Stationary Variance} \label{sec: prove sandwich}
+    We wish to prove \cref{thm: sandwich}.
+    \begin{proof}
+      To obtain these bounds, we apply variance expansions and \cref{eq: cond bias} 
+      \begin{align}
+        \Var(b(x_0) h(x_0, N)) = \Var |\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f| &\leq \Var (\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f) \\
+        &= \mathbb{E}[(\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f)^2] \\
+        &= \mathbb{E}[b^2(x_0)h^2(x_0, N)]
+      \end{align}
+      The first inequality holds by the monotonicity of expectation (writing out variance in expectation form). 
+      The second equality holds by variance expansion.
+      Since $\mathbb{E} f$ is constant, we can substitute $\Var (\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f) = \Var \mathbb{E}(\hat{f}_N \ |\ x_0)$ in our above equations to get the desired bounds. 
+    \end{proof}
+
+  \subsection{Bounding Squared Bias 1} \label{sec: prove ns1}
+    We wish to prove \cref{prop: ns bound 1}.
+    \begin{proof}
+      We first bound the marginal squared bias by the conditional squared bias with Jensen's inequality using the fact $\mathbb{E} \mathbb{E} f = \mathbb{E} f$ since it is constant,
+      \begin{equation}
+        |\mathbb{E} \hat{f}_N - \mathbb{E} f| = |\mathbb{E} (\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f)| \leq \mathbb{E} |\mathbb{E}(\hat{f}_N \ |\ x_0) - \mathbb{E} f| = h(N) \mathbb{E} |b(x_0)|
+      \end{equation}
+      It follows directly by assumption that
+      \begin{equation}
+        (\mathbb{E} \hat{f}_N - \mathbb{E} f)^2 \leq h^2(N) (\mathbb{E} b(x_0))^2 \leq h^2(N) \Var f(x_0) = \Var \mathbb{E}(\hat{f}_N \ |\ x_0)
+      \end{equation}
+      as desired.
+    \end{proof}
+
+  \subsection{Bounding Squared Bias 2} \label{sec: prove ns2}
+      We wish to prove \cref{prop: ns bound 2}.
+      \begin{proof}
+        To do this, consider the lower bound for \cref{cor: ns bounds}
+        \begin{equation}
+          \Var(b(x_0)) h^2(N) \leq \Var \mathbb{E}(\hat{f}_N \ |\ x_0) = \Var f(x_0) g(N)
+        \end{equation}
+        We can rewrite the variance of the conditional bias
+        \begin{align}
+          \Var(b(x_0)) &= \Var|f(x_0) - \mathbb{E} f| \\
+          &= \mathbb{E}[|f(x_0) - \mathbb{E} f|^2] - [\mathbb{E} |f(x_0) - \mathbb{E} f|]^2 \\
+          &= \mathbb{E}[(f(x_0) - \mathbb{E} f)^2] - [\mathbb{E} (f(x_0) - \mathbb{E} f)]^2 + [\mathbb{E} (f(x_0) - \mathbb{E} f)]^2- [\mathbb{E} |f(x_0) - \mathbb{E} f|]^2 \\
+          &= \Var (f(x_0) - \mathbb{E} f) + [\mathbb{E} (f(x_0) - \mathbb{E} f)]^2- [\mathbb{E} |f(x_0) - \mathbb{E} f|]^2 \\
+          &= \Var f(x_0) + C
+        \end{align}
+        where $C = [\mathbb{E} (f(x_0) - \mathbb{E} f)]^2- [\mathbb{E} |f(x_0) - \mathbb{E} f|]^2$.
+        Recall, by assumption that $\Var f(x_0) + C \geq (\mathbb{E}b(x_0))^2$.
+        We showed in the proof for \cref{prop: ns bound 2} that we can bound marginal squared bias by conditional squared bias, and so using \cref{eq: cond bias}
+        \begin{align}
+          (\mathbb{E} \hat{f}_N - \mathbb{E} f)^2 &\leq h^2(N) (\mathbb{E} b(x_0))^2 \\
+          &\leq h^2(N) (\Var f(x_0) + C) \\
+          &= h^2(N)  \Var(b(x_0)) \\
+          &\leq  \Var \mathbb{E}(\hat{f}_N \ |\ x_0)
+        \end{align}
+        as desired.
+      \end{proof}
+      Verifying this condition requires us to compute $C$, but that is immediate if we can compute $\mathbb{E}(b(x_0))$.
+      Thus, this bound is more easily verifiable than \cref{prop: ns bound 1}, which requires us to verify that decay rates are identical.
+
+
+  \subsection{Bounding Persistent Variance} \label{sec: prove persvar}
+    We wish to verify our proof in \cref{prop: pers var}.
+    \begin{proof}
+      To start, we decompose the persistent variance in order to induce the target variance.
+      \begin{align} \label{eq: pers var bound}
+        \mathbb{E} \Var (\bar{f}^{(.mk)} \ |\ x_0) &= \mathbb{E} \mathbb{E}[(\bar{f}^{(.mk)} - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))^2 \ |\ x_0] \\
+        &= \mathbb{E}[(\bar{f}^{(.mk)} - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))^2] \\
+        &= \mathbb{E}[((\bar{f}^{(.mk)} - f) + (f - \mathbb{E} f) + (\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0)))^2] \\
+        &= \mathbb{E}[(\bar{f}^{(.mk)} - f)^2] + \mathbb{E}[(f - \mathbb{E} f)^2] + \mathbb{E}[(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))^2] \\
+        &\quad + 2\mathbb{E}[(\bar{f}^{(.mk)} - f)(f - \mathbb{E} f)] + 2\mathbb{E}[(\bar{f}^{(.mk)} - f)(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))]  \\
+        &\quad + 2\mathbb{E}[(f - \mathbb{E} f)(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))] 
+      \end{align}
+      Notice that the second and third terms are exactly the target variance and conditional bias squared (from \cref{eq: cond bias}).
+      \begin{align}
+        \mathbb{E}[(f - \mathbb{E} f)^2] &= \Var f \\
+        \mathbb{E}[(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))^2] &= \mathbb{E}(b^2(x_0)) h^2(N)
+      \end{align}
+      We individually break down the cross terms.
+      We will use the fact that $x_0, f$ are both independent with respect to $x_0$.
+      \begin{align}
+        \mathbb{E}[(\bar{f}^{(.mk)} - f)(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))] &= \mathbb{E} \mathbb{E}[(\bar{f}^{(.mk)} - f)(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0)) \ |\ x_0] \\
+        &= \mathbb{E}[(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0)) \mathbb{E}(\bar{f}^{(.mk)} - f \ |\ x_0)] \\
+        &= -\mathbb{E}[(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))^2] \\
+        &= -\mathbb{E}(b^2(x_0)) h^2(N) \\
+        \mathbb{E}[(f - \mathbb{E} f)(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0))] &= \mathbb{E}(f - \mathbb{E} f) \mathbb{E}(\mathbb{E} f - \mathbb{E} (\bar{f}^{(.mk)} \ |\ x_0)) \\
+        &= 0
+      \end{align}
+      Lastly, we combine the first squared term and the first cross term to get a crude bound
+      \begin{align}
+        \mathbb{E}[(\bar{f}^{(.mk)} - f)^2] + 2\mathbb{E}[(\bar{f}^{(.mk)} - f)(f - \mathbb{E} f)] &= \mathbb{E}[(\bar{f}^{(.mk)} - f)(\bar{f}^{(.mk)} + f - 2\mathbb{E} f)] \\
+        &= [\mathbb{E}((\bar{f}^{(.mk)})^2) - \mathbb{E} (f^2)] - 2\mathbb{E} f(\mathbb{E}(\bar{f}^{(.mk)} - f))
+      \end{align}
+      We are left with the bias of the squared estimator $C = \mathbb{E}((\bar{f}^{(.mk)})^2) - \mathbb{E} (f^2)$, which will be small when the superchain variance is close to the target variance. 
+      Plugging our terms into \cref{eq: pers var bound} gives
+      \begin{align} \label{eq: pers var bound 2}
+        \mathbb{E} \Var (\bar{f}^{(.mk)} \ |\ x_0) &= C - 2\mathbb{E} f(\mathbb{E}(\bar{f}^{(.mk)} - f)) + \Var f + \mathbb{E}(b^2(x_0)) h^2(N) - 2\mathbb{E}(b^2(x_0)) h^2(N) \\
+        &= C - 2\mathbb{E} f(\mathbb{E}(\bar{f}^{(.mk)} - f)) + \Var f
+      \end{align}
+      Now we can bound the middle term here 
+      \begin{align} 
+        |-\mathbb{E} f(\mathbb{E}(\bar{f}^{(.mk)} - f))| \leq \mathbb{E}|f| \mathbb{E}|\bar{f}^{(.mk)} - f| \leq \mathbb{E}|f| \mathbb{E}(b(x_0)) h(N)
+      \end{align}
+      Putting this back into \cref{eq: pers var bound 2} yields the result
+      \begin{equation}
+        C - 2\mathbb{E}|f| \mathbb{E}(b(x_0)) h(N) + \Var f \leq \mathbb{E} \Var (\bar{f}^{(.mk)} \ |\ x_0) \leq C - \mathbb{E}|f| \mathbb{E}(b(x_0)) h(N) + \Var f
+      \end{equation}
+    \end{proof}
+    Under the assumption $\mathbb{E}|f| < \infty$, we can scale $f$ and the middle terms will be dominated by the conditional bias, which if we converge to stationarity will go to 0 (should note that if we do not converge to stationarity, there may be variation in persistent variance, but $\hat{R}_\nu$ should still convey non-convergence).
+    Hence, persistent variance being stable as $N$ increases boils down to whether the chain variance is similar to the target variance.
+
+  
+
+  \subsection{Short Explanation of Experiments} \label{sec: exps}
+    In our numerical experiments we run 3 models:
+    \begin{enumerate}
+      \item Unimodal Gaussian: $N(5, 4)$, with initial distribution $N(5, 100)$. We only use 1 warmup iterations to establish a meaningful decay rate, because this target will converge very fast.
+      \item Item Response Theory (used in \cite{Margossian2025}): We have a hierarchical model to model students exam taking abilities. 
+      This is a 501-dimensional model with $J = 400$ students and $L = 100$ questions.
+      The parameters are mean student ability $\delta \in \mathbb{R}$, individual abilities $\boldsymbol{\alpha} \in \mathbb{R}^J$ and question difficulty $\boldsymbol{\beta} \in \mathbb{R}^L$.
+      Each observation $y_{jl}$ is student $j$ response to question $l$.
+      Our model is
+      \begin{align}
+        \delta &\sim N(0.75, 1) \\
+        \boldsymbol{\alpha} &\sim MVN(0, I) \\
+        \boldsymbol{\beta} &\sim MVN(0, I) \\
+        y_{jl} &\sim \text{Bernoulli}(\text{logit}^{-1}(\alpha_j - \beta_l + \delta))
+      \end{align}
+      We use 25 warmup iterations and consider the first marginal only.
+      IRT (and its associated functions $\mathbb{E} f, \Var f$) are available in the \textit{inference gym} package.
+      \item Bimodal Gaussian: $0.7N(10, 1) + 0.3N(-10, 1)$, with initial distribution $N(0, 400)$. We use 10 warmup iterations.
+    \end{enumerate}
+
+    For these examples, we will run 32 superchains of 64 subchains each, and use a sampling phase of $N = 1$.
+    We use ChEES HMC on a T4 GPU to tune these chains in parallel.
+
+  \subsection{Non-stationary Variance and Bias Comparison} \label{sec: nsbias}
+    \begin{figure}[H]
+      \centering
+      \includegraphics[scale = 0.5]{ns_bias.pdf}
+      \caption{We compare the non-stationary bias and squared bias to see if it satisfies the bounds in \cref{prop: ns bound 1}.
+      In each plot, the red line represents non-stationary variance and blue line represents squared bias.
+      The y-axis is on the log scale.
+      For each experiment, we used 32 superchains of 64 subchains, and sampled $N = 1$ points.
+      We ran 1, 25, and 10 warmup phases respectively for unimodal Gaussian, IRT, and bimodal Gaussian.
+      We then sampled 100 successive ``sampling phase points''.
+      Note that when chains hit stationarity, i.e. non-stationary variance stops decreasing, there are computational issues with our estimates ($\widehat{B}_v, \widehat{W}_v$) because our algorithm is moving around pseudo-randomly. 
+      }
+      \label{fig: nsbias}
+    \end{figure}
+
+    In order for \cref{prop: ns bound 1} to be applied, we wish to check our assumption holds, that is $\Var f(x_0) \geq (\mathbb{E}(b^2(x_0)))^2$.
+    This is trivially true in our Gaussian case, because the initial bias is already 0.
+    For IRT, we assumed a $N(0, 100)$ initial distribution, which has greater variance than the initial squared bias of around 2.25.
+    Note that the IRT function in inference gym provides the ground truth and variance values.
+    For bimodal Gaussians, we assumed an $N(0, 400)$ initial distribution, which has greater variance than the initial squared bias of 16.
+   
+
+    \subsection{Comparing Persistent Variance over Time}
+      \begin{figure}[H]
+        \centering
+        \includegraphics[scale = 0.5]{pers_var.pdf}
+        \caption{We compare the persistent variance over sampling iterations to see whether they follow the results in \cref{prop: pers var}.
+        In each plot, the red line represents persistent variance and dashed black line represents the true target variance, which we can calculate in our simulated examples.
+        For each experiment, we used 32 superchains of 64 subchains, and sampled $N = 1$ points repeatedly.
+        We ran 1, 25, and 10 warmup phases respectively for unimodal Gaussian, IRT, and bimodal Gaussian.
+        We then sampled 100 successive ``sampling phase points''.
+       }
+       \label{fig: persvar}
+      \end{figure}
+
+
+\newpage
 
 
 \bibliographystyle{rss}
