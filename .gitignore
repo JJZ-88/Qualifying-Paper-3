@@ -278,3 +278,6 @@ TSWLatexianTemp*
 
 # DS_store
 .DS_store
+
+#papers folder
+papers/
